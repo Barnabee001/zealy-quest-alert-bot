@@ -45,25 +45,33 @@ export async function scrapeAllUrls(urls, scrapePage) {
 }
 
 // Detect additions between old and new content
-function detectAdditions(oldContent, newContent) {
+export function detectAdditions(oldContent, newContent) {
   const oldLines = oldContent.split('\n');
   const newLines = newContent.split('\n');
-  const additions = [];
 
-  // Simple line-by-line diff to find additions
-  let oldIndex = 0;
-  let newIndex = 0;
-
-  while (newIndex < newLines.length) {
-    if (oldIndex < oldLines.length && oldLines[oldIndex] === newLines[newIndex]) {
-      oldIndex++;
-      newIndex++;
-    } else {
-      // This line is new (addition)
-      additions.push(newLines[newIndex]);
-      newIndex++;
-    }
+  // Find the longest common prefix
+  let prefixLength = 0;
+  while (prefixLength < oldLines.length &&
+    prefixLength < newLines.length &&
+    oldLines[prefixLength] === newLines[prefixLength]) {
+    prefixLength++;
   }
+
+  // Find the longest common suffix
+  let oldSuffixIndex = oldLines.length - 1;
+  let newSuffixIndex = newLines.length - 1;
+  let suffixLength = 0;
+
+  while (oldSuffixIndex >= prefixLength &&
+    newSuffixIndex >= prefixLength &&
+    oldLines[oldSuffixIndex] === newLines[newSuffixIndex]) {
+    oldSuffixIndex--;
+    newSuffixIndex--;
+    suffixLength++;
+  }
+
+  // The additions are the lines between the common prefix and common suffix
+  const additions = newLines.slice(prefixLength, newLines.length - suffixLength);
 
   return additions.join('\n').trim();
 }

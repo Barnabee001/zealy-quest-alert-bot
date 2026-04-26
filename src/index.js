@@ -156,6 +156,18 @@ app.put("/api/users/:telegram_chat_id/block", async(req, res) => {
       });
     }
 
+    // Send Telegram message to user
+    try {
+      const message = blocked ?
+        `🔔 You have been unsubscribed from quest alerts. to resubscribe Contact @vicdevman ` :
+        `🔔 You have been resubscribed to quest alerts. You will now receive notifications for new quest updates.`;
+
+      await bot.sendMessage(telegram_chat_id, message);
+    } catch (msgError) {
+      console.error("Failed to send Telegram message to user:", msgError);
+      // Don't fail the request if message sending fails
+    }
+
     res.status(200).json({
       success: true,
       message: `User ${blocked ? 'blocked' : 'unblocked'} successfully`,
@@ -332,7 +344,7 @@ bot.onText(/\/start/, async(msg) => {
 
   bot.sendMessage(
     chatId,
-    `Bot active! You have subscribe to receive zealy quest alerts from monitored sprints.\n\nCommands:\n/add ZEALY_SPRINTS_URL - Add a new sprint to monitor\n/list - View all monitored sprints\n/remove ZEALY_SPRINTS_URL - Remove a sprint from monitoring\n/stop - Unsubscribe from alerts`,
+    `Bot active! You have subscribed to receive zealy quest alerts for monitored sprints.\n\nCommands:\n/add ZEALY_SPRINTS_URL - Add a new sprint to monitor\n/list - View all monitored sprints\n/remove ZEALY_SPRINTS_URL - Remove a sprint from monitoring\n/stop - Unsubscribe from alerts`,
   );
 });
 
