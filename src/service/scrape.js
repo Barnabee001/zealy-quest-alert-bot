@@ -27,9 +27,7 @@ dotenv.config({
  * @param {string} url - URL to scrape
  * @returns {Object} Extracted content with title, text, and metadata
  */
-export async function scrapePage(name) {
-  const url = `https://zealy.io/cw/${name}/questboard`
-
+export async function scrapePage(url) {
   try {
     // Method 1: Jina AI Reader (Recommended - No API key needed!)
     // Just prefix any URL with r.jina.ai/
