@@ -31,7 +31,10 @@ export async function scrapeAllUrls(urls, scrapePage) {
     logStatus(`Scraping ${i + 1}/${urls.length}: ${url}`);
     try {
       const scrapedData = await scrapePage(url);
-      newScrapedData.push({ url, data: scrapedData });
+      newScrapedData.push({
+        url,
+        data: scrapedData
+      });
       logStatus(`✅ Successfully scraped: ${url}`);
     } catch (error) {
       logStatus(`❌ Failed to scrape: ${url} - ${error.message}`);
@@ -45,21 +48,33 @@ export async function scrapeAllUrls(urls, scrapePage) {
 export async function detectContentChanges(newScrapedData) {
   logStatus('Comparing scraped data with database...');
   const alerts = [];
-  for (const { url, data } of newScrapedData) {
-    const existing = await ScrapedContent.findOne({ url });
-    
+  for (const {
+      url,
+      data
+    }
+    of newScrapedData) {
+    const existing = await ScrapedContent.findOne({
+      url
+    });
+
     if (!existing) {
       logStatus(`⚠️  No existing data found for: ${url}`);
       continue;
     }
 
     if (JSON.stringify(existing.scrapedcontent) !== JSON.stringify(data)) {
-      await ScrapedContent.findOneAndUpdate(
-        { url },
-        { scrapedcontent: data },
-        { upsert: true, returnDocument: 'after' }
-      );
-      alerts.push({ url, data });
+      await ScrapedContent.findOneAndUpdate({
+        url
+      }, {
+        scrapedcontent: data
+      }, {
+        upsert: true,
+        returnDocument: 'after'
+      });
+      alerts.push({
+        url,
+        data
+      });
       logStatus(`🔄 Content changed for: ${url}`);
     } else {
       logStatus(`✅ No changes for: ${url}`);
@@ -75,17 +90,17 @@ export async function sendAlertsToUsers(alerts, bot) {
     logStatus('No alerts to send');
     return;
   }
-  
+
   logStatus('Fetching users to send alerts...');
   const users = await User.find({});
   logStatus(`Found ${users.length} users to notify`);
-  
+
   for (const user of users) {
     for (const alert of alerts) {
       try {
         await bot.sendMessage(
           user.telegram_chat_id,
-          `🚀 New quest update for ${alert.url}\n\n${JSON.stringify(alert.data).substring(0, 1000)}...`,
+          `🚀 New quest update for ${alert.url}, Go for it`,
         );
         logStatus(`📤 Alert sent to user ${user.username}`);
       } catch (error) {
