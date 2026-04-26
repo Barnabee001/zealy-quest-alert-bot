@@ -260,11 +260,15 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
     await bot.sendMessage(chatId, `Checking URL: ${url}`);
     const scrapedData = await scrapePage(url);
 
+    logStatus(` === scraped before checking valid === ${JSON.stringify(scrapedData, null, 2)}`);
+
+
     // Check if URL is valid (no 404 errors)
     if (!isUrlValid(scrapedData)) {
       await bot.sendMessage(
         chatId,
-        `I'm not sure this page exist cause it returned a 404 error. check your source`,
+        `
+      I'm not sure this page exist cause it returned a 404 error. check your source`,
       );
       return;
     }
