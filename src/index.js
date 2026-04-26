@@ -9,6 +9,14 @@ import ScrapedContent from "./models/ScrapedContent.js";
 import {
   scrapePage
 } from "./service/scrape.js";
+import {
+  isUrlValid,
+  logStatus,
+  getMonitoredUrls,
+  scrapeAllUrls,
+  detectContentChanges,
+  sendAlertsToUsers
+} from "./helpers/scraperHelpers.js";
 
 const app = express();
 dotenv.config();
@@ -25,13 +33,19 @@ const bot = new TelegramBot(token, {
 
 app.get("/setup", async(req, res) => {
   try {
-    await bot.setWebHook(`https://zealyquestalertbot.vercel.app/bot`);
+    await bot.setWebHook(`https://zealy-quest-alert-bot.onrender.com/bot`);
     await bot.setMyCommands([{
       command: "start",
       description: "Get Connected",
     }, {
       command: "add",
       description: "Add new url",
+    }, {
+      command: "list",
+      description: "List monitored sprints",
+    }, {
+      command: "remove",
+      description: "Remove monitored sprint",
     }, ]);
     res.send("Webhook and commands set successfully!");
   } catch (error) {
@@ -53,59 +67,14 @@ app.post(`/bot`, (req, res) => {
 
 app.get("/scraper", async(req, res) => {
   try {
-    // Get all URLs from DB
-    const scrapedContents = await ScrapedContent.find({});
-    const urls = scrapedContents.map((doc) => doc.url);
+    logStatus('=== Starting scraper job ===');
 
-    // Call scraper for all URLs
-    const newScrapedData = [];
-    for (const url of urls) {
-      const scrapedData = await scrapePage(url);
-      newScrapedData.push({
-        url,
-        data: scrapedData,
-      });
-    }
+    const urls = await getMonitoredUrls();
+    const newScrapedData = await scrapeAllUrls(urls, scrapePage);
+    const alerts = await detectContentChanges(newScrapedData);
+    await sendAlertsToUsers(alerts, bot);
 
-    // Compare content with DB and update if changed
-    const alerts = [];
-    for (const {
-        url,
-        data
-      }
-      of newScrapedData) {
-      const existing = await ScrapedContent.findOne({
-        url,
-      });
-
-      if (JSON.stringify(existing.scrapedcontent) !== JSON.stringify(data)) {
-        await ScrapedContent.findOneAndUpdate({
-          url,
-        }, {
-          scrapedcontent: data,
-        }, {
-          upsert: true,
-          returnDocument: 'after'
-        }, );
-        alerts.push({
-          url,
-          data,
-        });
-      }
-    }
-
-    // If new content found, fetch users and send alert
-    if (alerts.length > 0) {
-      const users = await User.find({});
-      for (const user of users) {
-        for (const alert of alerts) {
-          await bot.sendMessage(
-            user.telegram_chat_id,
-            `🚀 New quest update for ${alert.url}\n\n${JSON.stringify(alert.data).substring(0, 1000)}...`,
-          );
-        }
-      }
-    }
+    logStatus('=== Scraper job completed ===');
 
     res.status(200).json({
       message: "Scraper Successful",
@@ -113,7 +82,7 @@ app.get("/scraper", async(req, res) => {
       usersNotified: alerts.length > 0 ? await User.countDocuments() : 0,
     });
   } catch (error) {
-    console.error("Scraper error:", error);
+    logStatus(`❌ Scraper error: ${error.message}`);
     res.status(500).json({
       error: "Scraper failed",
     });
@@ -144,7 +113,7 @@ bot.onText(/\/start/, async(msg) => {
 
   bot.sendMessage(
     chatId,
-    `Bot active! You will receive zealy quest alerts from monitored sprints.\n\nUse /add <url> to add a new sprint to monitor.`,
+    `Bot active! You have subscribe to receive zealy quest alerts from monitored sprints.\n\nCommands:\n/add url - Add a new sprint to monitor\n/list - View all monitored sprints\n/remove url - Remove a sprint from monitoring`,
   );
 });
 
@@ -162,8 +131,18 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
       return;
     }
 
-    // Scrape initial content
+    // Scrape initial content to validate URL
+    await bot.sendMessage(chatId, `Checking URL: ${url}`);
     const scrapedData = await scrapePage(url);
+
+    // Check if URL is valid (no 404 errors)
+    if (!isUrlValid(scrapedData)) {
+      await bot.sendMessage(
+        chatId,
+        `I'm not sure this page exist cause it returned a 404 error. check your source`,
+      );
+      return;
+    }
 
     // Store URL and scraped content in DB
     await ScrapedContent.create({
@@ -179,13 +158,60 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
     console.error("Error adding URL:", error);
     await bot.sendMessage(
       chatId,
-      `❌ Failed to add URL. Please check the URL and try again.`,
+      `Failed to add URL, my fault btw. try again or contact @vicdevman on X my Dms d`,
     );
   }
 });
 
+bot.onText(/\/list/, async(msg) => {
+  const chatId = msg.chat.id;
+
+  try {
+    const monitoredUrls = await ScrapedContent.find({}, {
+      url: 1,
+      _id: 0
+    });
+
+    if (monitoredUrls.length === 0) {
+      await bot.sendMessage(chatId, "No sprints are currently being monitored.\n\nUse /add url to add one.");
+      return;
+    }
+
+    let message = "📋 Monitored Sprints:\n\n";
+    monitoredUrls.forEach((doc, index) => {
+      message += `${index + 1}. ${doc.url}\n`;
+    });
+
+    await bot.sendMessage(chatId, message);
+  } catch (error) {
+    console.error("Error listing URLs:", error);
+    await bot.sendMessage(chatId, "Failed to fetch monitored sprints.");
+  }
+});
+
+bot.onText(/\/remove (.+)/, async(msg, match) => {
+  const chatId = msg.chat.id;
+  const url = match[1];
+
+  try {
+    const result = await ScrapedContent.findOneAndDelete({
+      url
+    });
+
+    if (!result) {
+      await bot.sendMessage(chatId, "This URL is not being monitored.");
+      return;
+    }
+
+    await bot.sendMessage(chatId, `✅ Successfully removed ${url} from monitoring.`);
+  } catch (error) {
+    console.error("Error removing URL:", error);
+    await bot.sendMessage(chatId, "Failed to remove URL. Please try again.");
+  }
+});
+
 bot.on("message", async(msg) => {
-  const commands = ["start", "add"];
+  const commands = ["start", "add", "list", "remove"];
 
   if (msg && msg.text[0] === "/") {
     const command = msg.text.split("/");
@@ -199,7 +225,7 @@ bot.on("message", async(msg) => {
   }
   bot.sendMessage(
     msg.chat.id,
-    `Bot active! No Update yet, lol Chill... \nI check every 2min.`,
+    `Chill... No Update yet, \nI check every minute.`,
   );
 
   console.log(msg);
