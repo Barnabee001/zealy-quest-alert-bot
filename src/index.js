@@ -70,6 +70,17 @@ app.get("/scraper", async(req, res) => {
     logStatus('=== Starting scraper job ===');
 
     const urls = await getMonitoredUrls();
+
+    if (urls.length === 0) {
+      logStatus('No URLs to monitor. Stopping scraper job.');
+      res.status(200).json({
+        message: "No URLs to monitor",
+        alertsFound: 0,
+        usersNotified: 0,
+      });
+      return;
+    }
+
     const newScrapedData = await scrapeAllUrls(urls, scrapePage);
     const alerts = await detectContentChanges(newScrapedData);
     await sendAlertsToUsers(alerts, bot);
@@ -113,7 +124,7 @@ bot.onText(/\/start/, async(msg) => {
 
   bot.sendMessage(
     chatId,
-    `Bot active! You have subscribe to receive zealy quest alerts from monitored sprints.\n\nCommands:\n/add url - Add a new sprint to monitor\n/list - View all monitored sprints\n/remove url - Remove a sprint from monitoring`,
+    `Bot active! You have subscribe to receive zealy quest alerts from monitored sprints.\n\nCommands:\n/add ZEALY_SPRINTS_URL - Add a new sprint to monitor\n/list - View all monitored sprints\n/remove ZEALY_SPRINTS_URL - Remove a sprint from monitoring`,
   );
 });
 
@@ -158,7 +169,7 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
     console.error("Error adding URL:", error);
     await bot.sendMessage(
       chatId,
-      `Failed to add URL, my fault btw. try again or contact @vicdevman on X my Dms d`,
+      `Failed to add URL, check url & try again or contact @vicdevman`,
     );
   }
 });
@@ -173,7 +184,7 @@ bot.onText(/\/list/, async(msg) => {
     });
 
     if (monitoredUrls.length === 0) {
-      await bot.sendMessage(chatId, "No sprints are currently being monitored.\n\nUse /add url to add one.");
+      await bot.sendMessage(chatId, "No sprints are currently being monitored.\n\nUse /add ZEALY_SPRINTS_URL to add one.");
       return;
     }
 
