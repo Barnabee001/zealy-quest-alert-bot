@@ -127,9 +127,11 @@ export function extractRelevantContent(content) {
       inRelevantSection = true;
     }
 
-    // Capture relevant lines
+    // Capture relevant lines, normalize image numbers
     if (inRelevantSection) {
-      relevantLines.push(line);
+      // Replace image numbers with placeholder to ignore numbering differences
+      const normalizedLine = line.replace(/!\[Image \d+\]/g, '![Image]');
+      relevantLines.push(normalizedLine);
     }
   }
 
