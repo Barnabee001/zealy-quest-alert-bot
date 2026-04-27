@@ -76,6 +76,83 @@ export function detectAdditions(oldContent, newContent) {
   return additions.join('\n').trim();
 }
 
+// Extract only the relevant quest content (ignoring ads, tracking, and footer)
+function extractRelevantContent(content) {
+  if (!content) return '';
+
+  const lines = content.split('\n');
+  const relevantLines = [];
+  let inRelevantSection = false;
+  let skipUntilPrivacy = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Skip everything after privacy section
+    if (line.includes('###### Your privacy') || line.includes('Your privacy')) {
+      skipUntilPrivacy = true;
+      break;
+    }
+
+    if (skipUntilPrivacy) continue;
+
+    // Skip Twitter tracking pixels
+    if (line.includes('t.co/1/i/adsct') || line.includes('analytics.twitter.com')) {
+      continue;
+    }
+
+    // Skip Zealy Browse promotion (footer content)
+    if (line.includes('## Zealy Browse promotion')) {
+      skipUntilPrivacy = true;
+      continue;
+    }
+
+    // Skip ad sections (hypelab.com links and adjacent images)
+    if (line.includes('web.hypelab.com') ||
+      line.includes('cdn.ixncdn.com') ||
+      (line.includes('![Image') && i > 0 && lines[i - 1].includes('cdn.ixncdn.com'))) {
+      continue;
+    }
+
+    // Start capturing from "Daily Challenge" or similar quest sections
+    if (line.includes('Daily Challenge') ||
+      line.includes('Onboarding') ||
+      line.includes('Promote us') ||
+      line.includes('Sprint') ||
+      line.includes('General')) {
+      inRelevantSection = true;
+    }
+
+    // Capture relevant lines
+    if (inRelevantSection) {
+      relevantLines.push(line);
+    }
+  }
+
+  return relevantLines.join('\n').trim();
+}
+
+// Normalize content for comparison (remove dynamic elements and whitespace)
+function normalizeContent(content) {
+  if (!content) return '';
+
+  // First extract only relevant content
+  const relevantContent = extractRelevantContent(content);
+
+  return relevantContent
+    .trim()
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .replace(/\?t=\d+/g, '') // Remove timestamp query params if present
+    .replace(/timestamp=\d+/g, '') // Remove other timestamp patterns
+    .replace(/_=\d+/g, '') // Remove cache-busting params
+    .replace(/&t=\d+/g, '&') // Remove timestamp from URLs
+    .replace(/\?\d+/g, '') // Remove standalone numbers in URLs
+    .replace(/event_id=[a-f0-9-]+/g, 'event_id=REDACTED') // Redact event IDs
+    .replace(/tw_pid=\d+\.\d+/g, 'tw_pid=REDACTED') // Redact Twitter tracking IDs
+    .replace(/txn_id=[a-z0-9]+/g, 'txn_id=REDACTED') // Redact transaction IDs
+    .trim();
+}
+
 // Compare scraped data with database and detect changes
 export async function detectContentChanges(newScrapedData) {
   logStatus('Comparing scraped data with database...');
@@ -98,8 +175,12 @@ export async function detectContentChanges(newScrapedData) {
     const existingContent = existing.content;
     const newContent = data.data.data.content || '';
 
-    if (existingContent !== newContent) {
-      // Detect additions
+    // Normalize both contents before comparison
+    const normalizedExisting = normalizeContent(existingContent);
+    const normalizedNew = normalizeContent(newContent);
+
+    if (normalizedExisting !== normalizedNew) {
+      // Detect additions using original content
       const additions = detectAdditions(existingContent, newContent);
 
       await ScrapedContent.findOneAndUpdate({
