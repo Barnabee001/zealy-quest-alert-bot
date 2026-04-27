@@ -138,6 +138,62 @@ export function extractRelevantContent(content) {
   return relevantLines.join('\n').trim();
 }
 
+// Validate that scraped content has minimum meaningful length
+export function isValidScrapedContent(content, minLength = 300) {
+  if (!content) return false;
+
+  const relevantContent = extractRelevantContent(content);
+  return relevantContent.length >= minLength;
+}
+
+// Extract only new quest items from additions (post-processing)
+export function extractNewQuestItems(additions) {
+  if (!additions) return '';
+
+  const lines = additions.split('\n');
+  const newQuests = [];
+  let currentQuest = [];
+  let inQuest = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Skip empty lines and common non-quest lines
+    if (!line || line === 'All' || line === 'Locked') {
+      continue;
+    }
+
+    // Detect quest link pattern: [Quest Name](url)
+    if (line.match(/^\[.*\]\(https:\/\/zealy\.io\/cw\/.*\)$/)) {
+      // Save previous quest if exists
+      if (currentQuest.length > 0) {
+        newQuests.push(currentQuest.join('\n'));
+      }
+      currentQuest = [line];
+      inQuest = true;
+    } else if (inQuest) {
+      // Add reward info (Xp, USDC, etc.)
+      if (line.includes('Xp') || line.includes('Usdc') || line.includes('USDC') || line.includes('Raffle')) {
+        currentQuest.push(line);
+      } else {
+        // End of quest info
+        if (currentQuest.length > 0) {
+          newQuests.push(currentQuest.join('\n'));
+          currentQuest = [];
+        }
+        inQuest = false;
+      }
+    }
+  }
+
+  // Don't forget the last quest
+  if (currentQuest.length > 0) {
+    newQuests.push(currentQuest.join('\n'));
+  }
+
+  return newQuests.join('\n\n---\n\n').trim();
+}
+
 // Normalize content for comparison (remove dynamic elements and whitespace)
 export function normalizeContent(content) {
   if (!content) return '';
@@ -181,6 +237,12 @@ export async function detectContentChanges(newScrapedData) {
     const existingContent = existing.content;
     const newContent = data.data.data.content || '';
 
+    // Validate that new content has minimum meaningful length
+    if (!isValidScrapedContent(newContent)) {
+      logStatus(`⚠️  New content too short or invalid for: ${url}`);
+      continue;
+    }
+
     // Normalize both contents before comparison
     const normalizedExisting = normalizeContent(existingContent);
     const normalizedNew = normalizeContent(newContent);
@@ -188,6 +250,9 @@ export async function detectContentChanges(newScrapedData) {
     if (normalizedExisting !== normalizedNew) {
       // Detect additions using original content
       const additions = detectAdditions(existingContent, newContent);
+
+      // Post-process to extract only new quest items
+      const newQuestItems = extractNewQuestItems(additions);
 
       await ScrapedContent.findOneAndUpdate({
         url
@@ -206,7 +271,7 @@ export async function detectContentChanges(newScrapedData) {
       alerts.push({
         url,
         data,
-        additions
+        additions: newQuestItems
       });
       logStatus(`🔄 Content changed for: ${url}`);
     } else {
@@ -236,7 +301,13 @@ export async function sendAlertsToUsers(alerts, bot) {
         let message = `🚀 New quest update for ${alert.url}\n\n`;
 
         if (alert.additions && alert.additions.length > 0) {
-          message += `📝 New content:\n${alert.additions.substring(0, 600)}${alert.additions.length > 600 ? '...' : ''}\n\n`;
+          let snippet = alert.additions;
+          if (snippet.length > 600) {
+            const front = snippet.substring(0, 300);
+            const back = snippet.substring(snippet.length - 300);
+            snippet = `${front}\n...\n${back}`;
+          }
+          message += `📝 New content:\n${snippet}\n\n`;
         }
 
         message += `Go for it!`;
