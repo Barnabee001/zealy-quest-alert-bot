@@ -361,6 +361,13 @@ export async function sendAlertsToUsers(alerts, bot) {
           const parts = snippet.split('---');
           snippet = parts.length > 1 ? parts[parts.length - 1].trim() : snippet;
 
+          // Format quest links: [Quest Name](url) -> " - Quest Name\nLink: url "
+          snippet = snippet
+            .replace(/\[/g, ' - ')
+            .replace(/\]/g, '\n')
+            .replace(/\(/g, 'Link: ')
+            .replace(/\)/g, ' ');
+
           if (snippet.length > 300) {
             snippet = `...\n${snippet.substring(snippet.length - 300)}`;
           }
