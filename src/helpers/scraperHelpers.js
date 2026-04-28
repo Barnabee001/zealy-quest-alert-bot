@@ -236,7 +236,7 @@ export function extractNewQuestItems(additions) {
     newQuests.push(currentQuest.join('\n'));
   }
 
-  return newQuests.join('\n\n').trim();
+  return newQuests.join('\n\n---\n\n').trim();
 }
 
 // Normalize content for comparison (remove dynamic elements and whitespace)
@@ -357,6 +357,10 @@ export async function sendAlertsToUsers(alerts, bot) {
 
         if (alert.additions && alert.additions.length > 0) {
           let snippet = alert.additions;
+          // Split on "---" to get only the new quests (part after separator)
+          const parts = snippet.split('---');
+          snippet = parts.length > 1 ? parts[parts.length - 1].trim() : snippet;
+
           if (snippet.length > 300) {
             snippet = `...\n${snippet.substring(snippet.length - 300)}`;
           }
