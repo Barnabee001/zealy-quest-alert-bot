@@ -236,7 +236,7 @@ export function extractNewQuestItems(additions) {
     newQuests.push(currentQuest.join('\n'));
   }
 
-  return newQuests.join('\n\n---\n\n').trim();
+  return newQuests.join('\n\n').trim();
 }
 
 // Normalize content for comparison (remove dynamic elements and whitespace)
@@ -349,17 +349,21 @@ export async function sendAlertsToUsers(alerts, bot) {
   for (const user of users) {
     for (const alert of alerts) {
       try {
-        let message = `🚀 New quest update for ${alert.url}\n\n`;
+        // Extract sprint name from URL (e.g., "updatezhub" from "https://zealy.io/cw/updatezhub/questboard")
+        const urlMatch = alert.url.match(/zealy\.io\/cw\/([^\/]+)/);
+        const sprintName = urlMatch ? urlMatch[1] : 'Sprint';
+
+        let message = `🎯 New ${sprintName} Quests\n\n`;
 
         if (alert.additions && alert.additions.length > 0) {
           let snippet = alert.additions;
           if (snippet.length > 300) {
             snippet = `...\n${snippet.substring(snippet.length - 300)}`;
           }
-          message += `📝 New content:\n${snippet}\n\n`;
+          message += `${snippet}\n\n`;
         }
 
-        message += `Go for it!`;
+        message += `✨ Complete them now to earn XP`;
 
         await bot.sendMessage(
           user.telegram_chat_id,
