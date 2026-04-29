@@ -119,11 +119,7 @@ export function extractRelevantContent(content) {
     }
 
     // Start capturing from "Daily Challenge" or similar quest sections
-    if (line.includes('Daily Challenge') ||
-      line.includes('Onboarding') ||
-      line.includes('Promote us') ||
-      line.includes('Sprint') ||
-      line.includes('General')) {
+    if (line.includes('Daily Challenge')) {
       inRelevantSection = true;
     }
 
