@@ -34,6 +34,14 @@ const scrapedContentSchema = new mongoose.Schema({
   scrapedAt: {
     type: Date,
     default: Date.now
+  },
+  isGlobal: {
+    type: Boolean,
+    default: false
+  },
+  userIds: {
+    type: [String],
+    default: []
   }
 }, {
   timestamps: true

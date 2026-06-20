@@ -88,6 +88,7 @@ export function extractRelevantContent(content) {
   const relevantLines = [];
   let inRelevantSection = false;
   let skipUntilPrivacy = false;
+  const questItemLinkRegex = /\[[^\]]+\]\(https:\/\/zealy\.io\/cw\/[^)]+\/questboard\/[a-f0-9-]{36}\/[a-f0-9-]{36}\)/i;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -123,6 +124,11 @@ export function extractRelevantContent(content) {
       inRelevantSection = true;
     }
 
+    // Fallback: if a board doesn't have "Daily Challenge", start at the first quest item link
+    if (!inRelevantSection && questItemLinkRegex.test(line)) {
+      inRelevantSection = true;
+    }
+
     // Capture relevant lines, normalize image numbers
     if (inRelevantSection) {
       // Replace image numbers with placeholder to ignore numbering differences
@@ -145,42 +151,17 @@ export function isValidScrapedContent(content, minLength = 300) {
     return false;
   }
 
-  // Check for minimum number of quest links (at least 3 expected for a valid quest board)
-  const questLinkMatches = content.match(/\[.*\]\(https:\/\/zealy\.io\/cw\/.*\/questboard\/.*\)/g);
-  if (!questLinkMatches || questLinkMatches.length < 3) {
+  // Validate based on quest ITEMS, not quest-board tabs/headers.
+  // A real quest item usually looks like: [Title](https://zealy.io/cw/<slug>/questboard/<uuid>/<uuid>)
+  const questItemLinks = relevantContent.match(/\[[^\]]+\]\(https:\/\/zealy\.io\/cw\/[^)]+\/questboard\/[a-f0-9-]{36}\/[a-f0-9-]{36}\)/gi);
+  if (!questItemLinks || questItemLinks.length < 1) {
     return false;
   }
 
-  // Check for multiple sections - a valid quest board should have at least 2 distinct sections
-  // Sections are typically headers followed by content (like "Daily Challenge", "Onboarding", custom names)
-  const lines = content.split('\n');
-  let sectionCount = 0;
-  let lastLineWasHeader = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    // Detect section headers (lines with no brackets, not just numbers, and followed by content)
-    if (trimmed.length > 0 &&
-      !trimmed.startsWith('[') &&
-      !trimmed.startsWith('!') &&
-      !trimmed.startsWith('#') &&
-      !/^\d+$/.test(trimmed) &&
-      !trimmed.includes('Zaps') &&
-      !trimmed.includes('Xp') &&
-      !trimmed.includes('All') &&
-      !trimmed.includes('Locked')) {
-      // This could be a section header
-      if (!lastLineWasHeader) {
-        sectionCount++;
-        lastLineWasHeader = true;
-      }
-    } else if (trimmed.length > 0) {
-      lastLineWasHeader = false;
-    }
-  }
-
-  // If we have very few sections, it's likely incomplete/glitched
-  if (sectionCount < 2) {
+  // Require at least one reward marker to reduce cases where we only got the header + CTA
+  // (works across boards: Zaps / Xp / Role / Level etc.)
+  const hasRewardMarker = /\b(Xp|Zaps|Role|Level)\b/i.test(relevantContent);
+  if (!hasRewardMarker) {
     return false;
   }
 
@@ -318,7 +299,9 @@ export async function detectContentChanges(newScrapedData) {
       alerts.push({
         url,
         data,
-        additions: newQuestItems
+        additions: newQuestItems,
+        isGlobal: existing.isGlobal || false,
+        userIds: existing.userIds || []
       });
       logStatus(`🔄 Content changed for: ${url}`);
     } else {
@@ -329,21 +312,31 @@ export async function detectContentChanges(newScrapedData) {
   return alerts;
 }
 
-// Send alerts to all users
+// Send alerts to all users (segmented by global/personal sprints and blacklist status)
 export async function sendAlertsToUsers(alerts, bot) {
   if (alerts.length === 0) {
     logStatus('No alerts to send');
     return;
   }
 
-  logStatus('Fetching users to send alerts...');
-  const users = await User.find({
-    blocked: false
-  });
-  logStatus(`Found ${users.length} active users to notify`);
+  logStatus('Dispatching alerts to eligible users...');
 
-  for (const user of users) {
-    for (const alert of alerts) {
+  for (const alert of alerts) {
+    // Find eligible users for this specific alert
+    const query = {
+      blocked: false,
+      blacklisted: { $ne: true }
+    };
+
+    if (!alert.isGlobal) {
+      // Only notify users who own this sprint
+      query.telegram_chat_id = { $in: alert.userIds || [] };
+    }
+
+    const users = await User.find(query);
+    logStatus(`Found ${users.length} active users to notify for ${alert.url}`);
+
+    for (const user of users) {
       try {
         // Extract sprint name from URL (e.g., "updatezhub" from "https://zealy.io/cw/updatezhub/questboard")
         const urlMatch = alert.url.match(/zealy\.io\/cw\/([^\/]+)/);
@@ -376,11 +369,11 @@ export async function sendAlertsToUsers(alerts, bot) {
           user.telegram_chat_id,
           message,
         );
-        logStatus(`📤 Alert sent to user ${user.username}`);
+        logStatus(`📤 Alert sent to user ${user.username} for ${sprintName}`);
       } catch (error) {
         logStatus(`❌ Failed to send alert to user ${user.username}: ${error.message}`);
       }
     }
   }
-  logStatus('All alerts sent successfully');
+  logStatus('All alerts processed successfully');
 }

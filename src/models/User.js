@@ -18,6 +18,18 @@ const userSchema = new mongoose.Schema({
   blocked: {
     type: Boolean,
     default: false
+  },
+  blacklisted: {
+    type: Boolean,
+    default: false
+  },
+  isAdmin: {
+    type: Boolean,
+    default: false
+  },
+  premium: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

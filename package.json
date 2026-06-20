@@ -6,7 +6,12 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "db:migrate": "node scripts/migrate-schemas.js",
+    "db:rollback": "node scripts/rollback-schemas.js",
+    "sprints:export": "node scripts/export-sprints.js",
+    "sprints:import": "node scripts/import-sprints.js",
+    "test:upgrades": "node src/tests/testUpgrades.js"
   },
   "keywords": [],
   "author": "",

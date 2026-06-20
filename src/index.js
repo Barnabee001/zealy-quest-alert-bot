@@ -125,6 +125,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // Toggle user blocked status
+// Toggle user blocked status (repurposed to toggle blacklist)
 app.put("/api/users/:telegram_chat_id/block", async(req, res) => {
   try {
     const {
@@ -144,7 +145,8 @@ app.put("/api/users/:telegram_chat_id/block", async(req, res) => {
     const user = await User.findOneAndUpdate({
       telegram_chat_id
     }, {
-      blocked
+      blocked,
+      blacklisted: blocked
     }, {
       returnDocument: 'after'
     });
@@ -178,6 +180,179 @@ app.put("/api/users/:telegram_chat_id/block", async(req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to update user status"
+    });
+  }
+});
+
+// Toggle user premium status
+app.put("/api/users/:telegram_chat_id/premium", async (req, res) => {
+  try {
+    const {
+      telegram_chat_id
+    } = req.params;
+    const {
+      premium
+    } = req.body;
+
+    if (typeof premium !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: "premium field must be a boolean"
+      });
+    }
+
+    const user = await User.findOneAndUpdate({
+      telegram_chat_id
+    }, {
+      premium
+    }, {
+      returnDocument: 'after'
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `User premium status updated to ${premium}`,
+      data: user
+    });
+  } catch (error) {
+    console.error("Error setting user premium status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to update premium status"
+    });
+  }
+});
+
+// Get all global sprints
+app.get("/api/admin/global-sprints", async (req, res) => {
+  try {
+    const globalSprints = await ScrapedContent.find({ isGlobal: true }).sort({
+      createdAt: -1
+    });
+    res.status(200).json({
+      success: true,
+      count: globalSprints.length,
+      data: globalSprints
+    });
+  } catch (error) {
+    console.error("Error fetching global sprints:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch global sprints"
+    });
+  }
+});
+
+// Add a sprint to the global pool
+app.post("/api/admin/global-sprints", async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        error: "url is required"
+      });
+    }
+
+    // Check if URL already exists
+    let sprint = await ScrapedContent.findOne({ url });
+
+    if (sprint) {
+      if (sprint.isGlobal) {
+        return res.status(200).json({
+          success: true,
+          message: "Sprint is already in global pool",
+          data: sprint
+        });
+      }
+      sprint.isGlobal = true;
+      await sprint.save();
+    } else {
+      // Scrape initial content to validate URL
+      const scrapedData = await scrapePage(url);
+      if (!isUrlValid(scrapedData)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid URL or page not found (returned 404)"
+        });
+      }
+
+      sprint = await ScrapedContent.create({
+        url,
+        title: scrapedData.data.data.title || 'No title',
+        description: scrapedData.data.data.description || '',
+        content: scrapedData.data.data.content || '',
+        metadata: scrapedData.data.data.metadata || {},
+        external: scrapedData.data.data.external || {},
+        usage: scrapedData.data.data.usage || {},
+        isGlobal: true,
+        userIds: [],
+        scrapedAt: new Date()
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Sprint successfully added/updated in global pool",
+      data: sprint
+    });
+  } catch (error) {
+    console.error("Error adding global sprint:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to add global sprint"
+    });
+  }
+});
+
+// Remove a sprint from the global pool
+app.delete("/api/admin/global-sprints", async (req, res) => {
+  try {
+    const { url } = req.body;
+    const queryUrl = url || req.query.url;
+    if (!queryUrl) {
+      return res.status(400).json({
+        success: false,
+        error: "url is required"
+      });
+    }
+
+    const sprint = await ScrapedContent.findOne({ url: queryUrl });
+    if (!sprint) {
+      return res.status(404).json({
+        success: false,
+        error: "Sprint not found"
+      });
+    }
+
+    sprint.isGlobal = false;
+    if (!sprint.userIds || sprint.userIds.length === 0) {
+      // No users are monitoring this, delete completely
+      await ScrapedContent.deleteOne({ url: queryUrl });
+      res.status(200).json({
+        success: true,
+        message: "Sprint removed from global pool and deleted since no users monitor it"
+      });
+    } else {
+      await sprint.save();
+      res.status(200).json({
+        success: true,
+        message: "Sprint removed from global pool, remains monitored by users",
+        data: sprint
+      });
+    }
+  } catch (error) {
+    console.error("Error removing global sprint:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to remove global sprint"
     });
   }
 });
@@ -324,8 +499,17 @@ bot.onText(/\/start/, async(msg) => {
   const username = msg.chat.username;
   const firstName = msg.chat.first_name;
 
-  // Store user details in DB and unblock if blocked
   try {
+    // Check if the user exists and is blacklisted
+    const existingUser = await User.findOne({ telegram_chat_id: chatId.toString() });
+    if (existingUser && existingUser.blacklisted) {
+      await bot.sendMessage(
+        chatId,
+        `🚫 You have been blacklisted by an admin and cannot resubscribe. Please contact support.`
+      );
+      return;
+    }
+
     const user = await User.findOneAndUpdate({
       telegram_chat_id: chatId.toString(),
     }, {
@@ -336,16 +520,17 @@ bot.onText(/\/start/, async(msg) => {
     }, {
       upsert: true,
       returnDocument: 'after'
-    }, );
+    });
     console.log("User stored:", chatId, username, firstName);
+
+    await bot.sendMessage(
+      chatId,
+      `Bot active! You have subscribed to receive zealy quest alerts for monitored sprints.\n\nCommands:\n/add ZEALY_SPRINTS_URL - Add a new sprint to monitor\n/list - View all monitored sprints\n/remove ZEALY_SPRINTS_URL - Remove a sprint from monitoring\n/stop - Unsubscribe from alerts`,
+    );
   } catch (error) {
     console.error("Error storing user:", error);
+    await bot.sendMessage(chatId, "Failed to start subscription. Please try again.");
   }
-
-  bot.sendMessage(
-    chatId,
-    `Bot active! You have subscribed to receive zealy quest alerts for monitored sprints.\n\nCommands:\n/add ZEALY_SPRINTS_URL - Add a new sprint to monitor\n/list - View all monitored sprints\n/remove ZEALY_SPRINTS_URL - Remove a sprint from monitoring\n/stop - Unsubscribe from alerts`,
-  );
 });
 
 bot.onText(/\/add (.+)/, async(msg, match) => {
@@ -353,12 +538,45 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
   const url = match[1];
 
   try {
+    // Check if user is blacklisted
+    const user = await User.findOne({ telegram_chat_id: chatId.toString() });
+    if (user && user.blacklisted) {
+      await bot.sendMessage(chatId, `🚫 You are blacklisted and cannot monitor sprints.`);
+      return;
+    }
+
+    // Limit check for non-premium users
+    const isPremium = user ? user.premium : false;
+    const isAdmin = user ? user.isAdmin : false;
+    if (!isPremium && !isAdmin) {
+      const ownedSprintsCount = await ScrapedContent.countDocuments({ userIds: chatId.toString() });
+      if (ownedSprintsCount >= 5) {
+        await bot.sendMessage(
+          chatId,
+          `⚠️ Limit Reached: Non-premium users can monitor at most 5 personal sprints. Contact the admin to upgrade to premium.`
+        );
+        return;
+      }
+    }
+
     // Check if URL already exists
-    const existing = await ScrapedContent.findOne({
-      url,
-    });
+    const existing = await ScrapedContent.findOne({ url });
     if (existing) {
-      await bot.sendMessage(chatId, `This URL is already being monitored.`);
+      if (existing.isGlobal) {
+        await bot.sendMessage(chatId, `📢 This URL is already in the Global Sprint Pool. You will automatically receive alerts for it.`);
+        return;
+      }
+      if (existing.userIds && existing.userIds.includes(chatId.toString())) {
+        await bot.sendMessage(chatId, `This URL is already being monitored by you.`);
+        return;
+      }
+
+      // Otherwise, add user to monitoring list
+      existing.userIds = existing.userIds || [];
+      existing.userIds.push(chatId.toString());
+      await existing.save();
+
+      await bot.sendMessage(chatId, `✅ Successfully added ${url} to your monitored sprints!`);
       return;
     }
 
@@ -368,18 +586,16 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
 
     logStatus(` === scraped before checking valid === ${JSON.stringify(scrapedData, null, 2)}`);
 
-
     // Check if URL is valid (no 404 errors)
     if (!isUrlValid(scrapedData)) {
       await bot.sendMessage(
         chatId,
-        `
-      I'm not sure this page exist cause it returned a 404 error. check your source`,
+        `I'm not sure this page exists cause it returned a 404 error. Check your source.`,
       );
       return;
     }
 
-    // Store URL and scraped content in DB
+    // Store URL and scraped content in DB as user-owned
     await ScrapedContent.create({
       url,
       title: scrapedData.data.data.title || 'No title',
@@ -388,12 +604,14 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
       metadata: scrapedData.data.data.metadata || {},
       external: scrapedData.data.data.external || {},
       usage: scrapedData.data.data.usage || {},
+      isGlobal: false,
+      userIds: [chatId.toString()],
       scrapedAt: new Date()
     });
 
     await bot.sendMessage(
       chatId,
-      `✅ Successfully added ${url} to monitoring!`,
+      `✅ Successfully added ${url} to your monitored sprints!`,
     );
   } catch (error) {
     console.error("Error adding URL:", error);
@@ -408,19 +626,26 @@ bot.onText(/\/list/, async(msg) => {
   const chatId = msg.chat.id;
 
   try {
-    const monitoredUrls = await ScrapedContent.find({}, {
+    const monitoredSprints = await ScrapedContent.find({
+      $or: [
+        { isGlobal: true },
+        { userIds: chatId.toString() }
+      ]
+    }, {
       url: 1,
-      _id: 0
+      isGlobal: 1,
+      title: 1
     });
 
-    if (monitoredUrls.length === 0) {
-      await bot.sendMessage(chatId, "No sprints are currently being monitored.\n\nUse /add ZEALY_SPRINTS_URL to add one.");
+    if (monitoredSprints.length === 0) {
+      await bot.sendMessage(chatId, "No sprints are currently being monitored for you.\n\nUse /add ZEALY_SPRINTS_URL to add one.");
       return;
     }
 
-    let message = "📋 Monitored Sprints:\n\n";
-    monitoredUrls.forEach((doc, index) => {
-      message += `${index + 1}. ${doc.url}\n`;
+    let message = "📋 Your Monitored Sprints:\n\n";
+    monitoredSprints.forEach((doc, index) => {
+      const typeLabel = doc.isGlobal ? " [Global Pool]" : " [Personal]";
+      message += `${index + 1}. ${doc.url}${typeLabel}\n`;
     });
 
     await bot.sendMessage(chatId, message);
@@ -435,16 +660,33 @@ bot.onText(/\/remove (.+)/, async(msg, match) => {
   const url = match[1];
 
   try {
-    const result = await ScrapedContent.findOneAndDelete({
-      url
-    });
+    const sprint = await ScrapedContent.findOne({ url });
 
-    if (!result) {
+    if (!sprint) {
       await bot.sendMessage(chatId, "This URL is not being monitored.");
       return;
     }
 
-    await bot.sendMessage(chatId, `✅ Successfully removed ${url} from monitoring.`);
+    if (sprint.isGlobal) {
+      await bot.sendMessage(chatId, "🚫 Global Pool sprints can only be removed by administrators.");
+      return;
+    }
+
+    const index = sprint.userIds.indexOf(chatId.toString());
+    if (index === -1) {
+      await bot.sendMessage(chatId, "You are not monitoring this URL.");
+      return;
+    }
+
+    sprint.userIds.splice(index, 1);
+
+    if (sprint.userIds.length === 0) {
+      await ScrapedContent.deleteOne({ url });
+    } else {
+      await sprint.save();
+    }
+
+    await bot.sendMessage(chatId, `✅ Successfully removed ${url} from your monitored sprints.`);
   } catch (error) {
     console.error("Error removing URL:", error);
     await bot.sendMessage(chatId, "Failed to remove URL. Please try again.");
