@@ -75,7 +75,7 @@ async function runTests() {
     if (blUserPreStart && blUserPreStart.blacklisted) {
       await mockBot.sendMessage(
         "test_blacklisted_id",
-        `🚫 You have been blacklisted by an admin and cannot resubscribe. Please contact support.`
+        `🚫 You have been blacklisted and cannot resubscribe. Please contact @vicdevman for support.`
       );
     }
     
@@ -99,8 +99,8 @@ async function runTests() {
 
     // 3. Test Sprint Limit for Non-Premium User
     console.log("\n--- Testing Sprint Limit for Non-Premium User ---");
-    // Add 5 sprints for normal user
-    for (let i = 1; i <= 5; i++) {
+    // Add 3 sprints for normal user
+    for (let i = 1; i <= 3; i++) {
       await ScrapedContent.create({
         url: `test_url_${i}`,
         title: `Test Sprint ${i}`,
@@ -110,27 +110,27 @@ async function runTests() {
       });
     }
 
-    // Attempt to add 6th sprint for normal user
+    // Attempt to add 4th sprint for normal user
     const count = await ScrapedContent.countDocuments({ userIds: "test_normal_id" });
     console.log(`Normal user owned sprints: ${count}`);
-    if (count >= 5) {
+    if (count >= 3) {
       await mockBot.sendMessage(
         "test_normal_id",
-        `⚠️ Limit Reached: Non-premium users can monitor at most 5 personal sprints. Contact the admin to upgrade to premium.`
+        `⚠️ Limit Reached: Non-premium users can monitor at most 3 personal sprints. Please contact @vicdevman to upgrade to premium.`
       );
     }
 
     const limitMsg = sentMessages.find(m => m.chatId === "test_normal_id" && m.text.includes("Limit Reached"));
     if (!limitMsg) {
-      throw new Error("Limit warning was not sent to non-premium user when adding 6th sprint");
+      throw new Error("Limit warning was not sent to non-premium user when adding 4th sprint");
     }
     console.log("✅ Premium limit verification for non-premium user passed.");
 
     // Verify premium user has no limits
     // Unblock premium user first
     await User.findOneAndUpdate({ telegram_chat_id: "test_premium_id" }, { blocked: false });
-    // Add 6 sprints for premium user
-    for (let i = 1; i <= 6; i++) {
+    // Add 4 sprints for premium user
+    for (let i = 1; i <= 4; i++) {
       const url = `test_url_prem_${i}`;
       await ScrapedContent.create({
         url,
@@ -141,9 +141,9 @@ async function runTests() {
       });
     }
     const countPrem = await ScrapedContent.countDocuments({ userIds: "test_premium_id" });
-    console.log(`Premium user owned sprints: ${countPrem} (Expected: 6)`);
-    if (countPrem !== 6) {
-      throw new Error("Premium user could not add 6 sprints");
+    console.log(`Premium user owned sprints: ${countPrem} (Expected: 4)`);
+    if (countPrem !== 4) {
+      throw new Error("Premium user could not add 4 sprints");
     }
     console.log("✅ Premium user unlimited sprints verified.");
 

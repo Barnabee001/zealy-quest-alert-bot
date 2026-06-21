@@ -216,6 +216,18 @@ app.put("/api/users/:telegram_chat_id/premium", async (req, res) => {
       });
     }
 
+    // Send Telegram message to user
+    try {
+      const message = premium ?
+        `🌟 Congratulations! You have been upgraded to Premium status. You can now monitor unlimited personal sprints.` :
+        `🔔 Your Premium status has been removed. You will now be subject to the standard sprint limit. Please contact @vicdevman if you have questions.`;
+
+      await bot.sendMessage(telegram_chat_id, message);
+    } catch (msgError) {
+      console.error("Failed to send Telegram message to user:", msgError);
+      // Don't fail the request if message sending fails
+    }
+
     res.status(200).json({
       success: true,
       message: `User premium status updated to ${premium}`,
@@ -505,7 +517,7 @@ bot.onText(/\/start/, async(msg) => {
     if (existingUser && existingUser.blacklisted) {
       await bot.sendMessage(
         chatId,
-        `🚫 You have been blacklisted by an admin and cannot resubscribe. Please contact support.`
+        `🚫 You have been blacklisted and cannot resubscribe. Please contact @vicdevman for support.`
       );
       return;
     }
@@ -541,7 +553,7 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
     // Check if user is blacklisted
     const user = await User.findOne({ telegram_chat_id: chatId.toString() });
     if (user && user.blacklisted) {
-      await bot.sendMessage(chatId, `🚫 You are blacklisted and cannot monitor sprints.`);
+      await bot.sendMessage(chatId, `🚫 You are blacklisted and cannot monitor sprints. Please contact @vicdevman for support.`);
       return;
     }
 
@@ -550,10 +562,10 @@ bot.onText(/\/add (.+)/, async(msg, match) => {
     const isAdmin = user ? user.isAdmin : false;
     if (!isPremium && !isAdmin) {
       const ownedSprintsCount = await ScrapedContent.countDocuments({ userIds: chatId.toString() });
-      if (ownedSprintsCount >= 5) {
+      if (ownedSprintsCount >= 3) {
         await bot.sendMessage(
           chatId,
-          `⚠️ Limit Reached: Non-premium users can monitor at most 5 personal sprints. Contact the admin to upgrade to premium.`
+          `⚠️ Limit Reached: Non-premium users can monitor at most 3 personal sprints. Please contact @vicdevman to upgrade to premium.`
         );
         return;
       }
