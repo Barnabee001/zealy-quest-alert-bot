@@ -38,7 +38,7 @@ const bot = new TelegramBot(token, {
 
 app.get("/setup", async(req, res) => {
   try {
-    await bot.setWebHook(`https://zealy-quest-alert-bot.onrender.com/bot`);
+    await bot.setWebHook(`https://zealy-quest-alert-bot-mxds.onrender.com/bot`);
     await bot.setMyCommands([{
       command: "start",
       description: "Get Connected",
